@@ -1,0 +1,10 @@
+# ===== LLM Trace Viewer =====
+
+# 模型文件
+models/
+
+# 虛擬環境
+trace/
+
+# 輸出
+runs/

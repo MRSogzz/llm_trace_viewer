@@ -1,0 +1,1072 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>LLM Trace Viewer</title>
+<style>
+:root{
+  --bg:#0b0e14; --panel:#131822; --panel2:#1a2030; --border:#242c3d;
+  --text:#e7ecf6; --muted:#8b97ad; --accent:#5b8cff; --accent2:#a855f7;
+  --green:#34d399; --amber:#fbbf24; --red:#f87171;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+               "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  font-size:14px; overflow:hidden;
+}
+.hidden{display:none !important}
+button{font-family:inherit}
+
+.drop{
+  height:100%; display:flex; align-items:center; justify-content:center;
+  background: radial-gradient(circle at 50% 30%, #16203a 0%, #0b0e14 60%);
+}
+.drop-inner{ text-align:center; padding:40px 56px; border:2px dashed var(--border);
+  border-radius:20px; background:rgba(20,24,33,.7); backdrop-filter:blur(6px); }
+.drop-inner h1{margin:0 0 8px; font-size:24px; letter-spacing:.5px}
+.drop-inner p{margin:0 0 18px; color:var(--muted)}
+.drop-inner.dragover{border-color:var(--accent); background:rgba(91,140,255,.08)}
+
+.btn{
+  display:inline-block; padding:8px 18px; border-radius:10px; cursor:pointer;
+  background:linear-gradient(135deg,var(--accent),var(--accent2)); color:#fff;
+  font-weight:600; border:none; font-size:13px; transition:.15s;
+}
+.btn:hover{filter:brightness(1.12)}
+.btn.ghost{background:transparent; border:1px solid var(--border); color:var(--muted)}
+.btn.ghost:hover{color:var(--text); border-color:var(--accent)}
+.btn.tiny{padding:2px 9px; border-radius:8px; font-size:14px; line-height:1.4}
+
+.app{height:100%; display:flex; flex-direction:column}
+.topbar{
+  display:flex; align-items:center; gap:14px; padding:10px 16px;
+  border-bottom:1px solid var(--border); background:var(--panel);
+  flex-wrap:wrap;
+}
+.brand{font-weight:700; font-size:14px; display:flex; align-items:center; gap:8px; min-width:0}
+.brand span{white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:46vw}
+.badges{display:flex; gap:6px; flex-wrap:wrap; flex:1}
+.chip{
+  font-size:11px; padding:3px 9px; border-radius:999px;
+  background:var(--panel2); border:1px solid var(--border); color:var(--muted);
+  white-space:nowrap;
+}
+.chip b{color:var(--text); font-weight:600}
+.chip.warn{border-color:#5a3a12; background:#2a1d0a; color:var(--amber)}
+
+.genbar{
+  display:grid; grid-template-columns:auto 1fr; gap:6px 12px; align-items:start;
+  padding:10px 16px; border-bottom:1px solid var(--border); background:#10151f;
+  max-height:110px; overflow-y:auto;
+}
+.genbar .label{font-size:11px; color:var(--muted); padding-top:3px; letter-spacing:.5px}
+.gen-text{
+  font-family:var(--mono); font-size:12px; line-height:1.65; color:#c9d4e8;
+  white-space:pre-wrap; word-break:break-all;
+}
+
+.workspace{flex:1; display:flex; overflow:hidden}
+
+.sidebar{
+  width:220px; flex:0 0 220px; border-right:1px solid var(--border);
+  background:var(--panel); display:flex; flex-direction:column; overflow:hidden;
+}
+.side-title{
+  padding:10px 14px; font-size:11px; letter-spacing:1px; color:var(--muted);
+  text-transform:uppercase; border-bottom:1px solid var(--border);
+}
+.step-list{flex:1; overflow-y:auto; padding:8px}
+.step-btn{
+  width:100%; display:flex; align-items:center; gap:8px; padding:7px 9px;
+  margin-bottom:4px; border-radius:9px; cursor:pointer; text-align:left;
+  background:transparent; border:1px solid transparent; color:var(--muted);
+  font-size:12px; transition:.12s;
+}
+.step-btn:hover{background:var(--panel2); color:var(--text)}
+.step-btn.active{background:rgba(91,140,255,.14); border-color:rgba(91,140,255,.5); color:var(--text)}
+.step-btn .idx{font-family:var(--mono); font-size:11px; opacity:.7; width:22px}
+.step-btn .kind{
+  font-size:9.5px; padding:1px 6px; border-radius:5px; font-weight:700; letter-spacing:.4px;
+}
+.kind.prefill{background:#1d3a5c; color:#7cb6ff}
+.kind.decode{background:#1f3b30; color:#5fd8a5}
+.step-btn .tok{
+  flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  font-family:var(--mono); font-size:11.5px;
+}
+
+.main{flex:1; overflow-y:auto; padding:16px 18px 60px; display:flex; flex-direction:column; gap:14px}
+.panel{background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:14px}
+.panel-title{font-size:12px; letter-spacing:1px; color:var(--muted); text-transform:uppercase; margin-bottom:10px}
+.panel-title-row{display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; flex-wrap:wrap}
+.panel-title-row .panel-title{margin:0}
+
+.info-grid{display:flex; gap:22px; flex-wrap:wrap; margin-bottom:12px}
+.info-item{display:flex; flex-direction:column; gap:2px}
+.info-item .k{font-size:10.5px; color:var(--muted); letter-spacing:.6px; text-transform:uppercase}
+.info-item .v{font-family:var(--mono); font-size:13px; color:var(--text)}
+
+.tok-strip{display:flex; flex-wrap:wrap; gap:5px}
+.tok-chip{
+  display:flex; flex-direction:column; align-items:center; gap:1px;
+  padding:4px 8px; border-radius:8px; background:var(--panel2);
+  border:1px solid var(--border); min-width:34px;
+}
+.tok-chip .chip-pos{font-size:9px; color:var(--muted); font-family:var(--mono)}
+.tok-chip .chip-text{font-family:var(--mono); font-size:12px; color:#dbe4f5; white-space:pre}
+.tok-chip.special{border-color:#4a3b6b; background:#221a33}
+
+.dist-list{display:flex; flex-direction:column; gap:5px}
+.dist-row{display:grid; grid-template-columns:190px 1fr 84px; gap:10px; align-items:center}
+.dist-tok{display:flex; align-items:baseline; gap:7px; min-width:0}
+.dist-tok .tok-text{font-family:var(--mono); font-size:12.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.dist-tok .tok-id{font-size:10px; color:var(--muted); font-family:var(--mono)}
+.dist-bar{height:9px; background:#0d121c; border-radius:6px; overflow:hidden}
+.dist-fill{height:100%; background:#33415c; border-radius:6px}
+.dist-fill.best{background:linear-gradient(90deg,var(--accent),var(--accent2))}
+.dist-p{
+  text-align:right; font-family:var(--mono); font-size:11.5px; color:var(--muted);
+  font-variant-numeric:tabular-nums;
+}
+.dist-row.top .dist-p{color:var(--green); font-weight:700}
+
+.layer-ctrl{display:flex; align-items:center; gap:10px}
+.layer-slider{width:min(420px,42vw); accent-color:var(--accent)}
+.layer-num{
+  font-family:var(--mono); font-size:14px; font-weight:700; color:var(--accent);
+  min-width:34px; text-align:center;
+}
+
+.layer-body{display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); gap:12px}
+.card{background:var(--panel2); border:1px solid var(--border); border-radius:12px; padding:11px 12px; min-width:0}
+.card.wide{grid-column:1 / -1}
+.card-title{font-size:11px; color:var(--muted); letter-spacing:.6px; margin-bottom:9px; text-transform:uppercase}
+
+.resid-row{display:flex; align-items:flex-end; gap:6px; height:96px; overflow-x:auto; padding-bottom:2px}
+.resid-item{display:flex; flex-direction:column; align-items:center; gap:4px; min-width:26px}
+.resid-bar{width:16px; height:70px; background:#0d121c; border-radius:4px; display:flex; align-items:flex-end; overflow:hidden}
+.resid-fill{width:100%; border-radius:4px; background:linear-gradient(180deg,var(--accent),var(--accent2)); min-height:2px}
+.resid-lab{font-size:9.5px; color:var(--muted); font-family:var(--mono)}
+
+.head-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(270px,1fr)); gap:9px; grid-column:1 / -1}
+.head-card{background:var(--panel2); border:1px solid var(--border); border-radius:11px; padding:9px 10px}
+.head-title{display:flex; align-items:center; justify-content:space-between; margin-bottom:7px}
+.tag{font-size:10px; font-weight:700; padding:1px 7px; border-radius:6px; background:#26324a; color:#9fc0ff; font-family:var(--mono)}
+.head-title .muted{font-size:10.5px; color:var(--muted); font-family:var(--mono)}
+
+.kv-list{display:flex; flex-direction:column; gap:3px}
+.kv-row{display:grid; grid-template-columns:26px 62px 1fr 56px; gap:6px; align-items:center; font-size:11px}
+.kv-row.mlp{grid-template-columns:46px 1fr 52px}
+.kv-row.lens{grid-template-columns:22px 66px 1fr 56px}
+.kv-pos{font-family:var(--mono); font-size:10px; color:var(--muted); text-align:right}
+.kv-tok{font-family:var(--mono); font-size:11px; color:#cbd6ea; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.kv-bar{height:7px; background:#0d121c; border-radius:5px; overflow:hidden}
+.kv-fill{display:block; height:100%; border-radius:5px; background:linear-gradient(90deg,#3b6dd8,#7c5cff); min-width:1px}
+.kv-fill.neg{background:linear-gradient(90deg,#8a3a3a,#d05a5a)}
+.kv-w{
+  font-family:var(--mono); font-size:10px; color:var(--muted); text-align:right;
+  font-variant-numeric:tabular-nums;
+}
+
+/* ============ 長條圖 ============ */
+.race-controls{display:flex; align-items:center; gap:8px; flex-wrap:wrap}
+.race-select{
+  background:var(--panel2); color:var(--text); border:1px solid var(--border);
+  border-radius:8px; padding:4px 10px; font-size:12px; font-family:inherit;
+  cursor:pointer; outline:none;
+}
+.race-select:focus{border-color:var(--accent)}
+.race-label{
+  font-family:var(--mono); font-size:11.5px; color:var(--accent);
+  min-width:140px; text-align:right;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+
+/* 幀間隔 */
+.race-delay{
+  display:flex; align-items:center; gap:8px;
+  padding:3px 10px 3px 12px; border-radius:8px;
+  background:var(--panel2); border:1px solid var(--border);
+}
+.race-delay-label{font-size:11px; color:var(--muted); letter-spacing:.5px; white-space:nowrap}
+.race-delay-slider{
+  -webkit-appearance:none; appearance:none;
+  width:120px; height:4px; border-radius:2px;
+  /* 左快右慢 */
+  background:linear-gradient(90deg,#5b8cff,#a855f7);
+  outline:none; cursor:pointer;
+}
+.race-delay-slider::-webkit-slider-thumb{
+  -webkit-appearance:none; appearance:none;
+  width:13px; height:13px; border-radius:50%;
+  background:#fff; border:2px solid var(--accent);
+  cursor:pointer; box-shadow:0 0 6px rgba(91,140,255,.6);
+}
+.race-delay-slider::-moz-range-thumb{
+  width:13px; height:13px; border-radius:50%;
+  background:#fff; border:2px solid var(--accent);
+  cursor:pointer;
+}
+.race-delay-value{
+  font-family:var(--mono); font-size:11.5px; color:var(--accent);
+  font-weight:700; min-width:64px; text-align:right;
+  font-variant-numeric:tabular-nums;
+}
+.race-delay .delay-preset{
+  background:transparent; border:1px solid var(--border); color:var(--muted);
+  border-radius:6px; padding:1px 7px; font-size:11px; cursor:pointer;
+  font-family:var(--mono); transition:.12s;
+}
+.race-delay .delay-preset:hover{color:var(--text); border-color:var(--accent)}
+.race-delay .delay-preset.active{color:var(--text); border-color:var(--accent); background:rgba(91,140,255,.14)}
+
+.race-progress{
+  height:2px; background:#0d121c; border-radius:1px; margin-bottom:10px; overflow:hidden;
+}
+.race-progress-fill{
+  height:100%; width:0;
+  background:linear-gradient(90deg,var(--accent),var(--accent2));
+  transition:width .08s linear;
+}
+.race-chart{
+  position:relative;
+  overflow:hidden;
+  padding:4px 0;
+}
+.race-bar{
+  position:absolute;
+  left:0; right:0;
+  height:34px;
+  padding:2px 0;
+  box-sizing:border-box;
+  display:grid;
+  grid-template-columns:170px 1fr 84px;
+  gap:10px;
+  align-items:center;
+  opacity:0;
+  transition:opacity .35s ease-out;
+  will-change:transform;
+  transform:translateZ(0);
+}
+.race-bar.visible{opacity:1}
+.race-bar-label{
+  font-family:var(--mono); font-size:13px; color:#e2e8f5;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  text-align:right;
+  text-shadow:0 0 12px rgba(91,140,255,.25);
+}
+.race-bar-track{
+  height:30px; background:#0d121c; border-radius:7px; overflow:hidden;
+  position:relative;
+  border:1px solid #1d2537;
+}
+.race-bar-track::after{
+  content:''; position:absolute; inset:0;
+  background:repeating-linear-gradient(90deg,
+      rgba(255,255,255,.035) 0 1px, transparent 1px 10%);
+  pointer-events:none;
+}
+.race-bar-fill{
+  height:100%; width:0;
+  border-radius:6px;
+  background:linear-gradient(90deg, #2c4d9e, #5b8cff);
+  transition:background .4s;
+  will-change:width;
+}
+.race-bar.top .race-bar-fill{
+  background:linear-gradient(90deg, #1e8a68, #34d399, #5b8cff, #a855f7);
+  box-shadow:0 0 18px rgba(52,211,153,.35), 0 0 6px rgba(91,140,255,.5);
+}
+.race-bar.top .race-bar-label{color:#9ff0cf}
+.race-bar-value{
+  font-family:var(--mono); font-size:12px; color:var(--muted);
+  text-align:right; font-variant-numeric:tabular-nums;
+}
+.race-bar.top .race-bar-value{color:var(--green); font-weight:700}
+
+::-webkit-scrollbar{width:9px; height:9px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:#26304a; border-radius:6px}
+::-webkit-scrollbar-thumb:hover{background:#35426a}
+
+@media (max-width:820px){
+  .sidebar{width:150px; flex-basis:150px}
+  .dist-row{grid-template-columns:110px 1fr 74px}
+  .genbar{max-height:150px}
+  .race-bar{grid-template-columns:96px 1fr 70px}
+  .race-bar-label{font-size:11px}
+  .race-delay-slider{width:70px}
+}
+</style>
+</head>
+<body>
+
+<div id="drop" class="drop">
+  <div class="drop-inner">
+    <h1>LLM Trace Viewer</h1>
+    <p>把 run_*.json 拖到這裡，或者</p>
+    <label class="btn">選擇json文件<input type="file" id="file" accept=".json,application/json" hidden></label>
+  </div>
+</div>
+
+<div id="app" class="app hidden">
+  <header class="topbar">
+    <div class="brand"> <span id="modelName">model</span></div>
+    <div class="badges" id="badges"></div>
+    <button class="btn ghost" id="reload">重新載入</button>
+  </header>
+
+  <div class="genbar">
+    <div class="label">PROMPT</div>
+    <div class="gen-text" id="promptText"></div>
+    <div class="label">OUTPUT</div>
+    <div class="gen-text" id="genText"></div>
+  </div>
+
+  <div class="workspace">
+    <aside class="sidebar">
+      <div class="side-title">推理步驟</div>
+      <div id="stepList" class="step-list"></div>
+    </aside>
+    <main class="main" id="main"></main>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   工具函数
+   ============================================================ */
+const $  = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+
+function el(tag, cls, text){
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+function esc(s){
+  return String(s ?? '').replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
+}
+function vis(s){
+  if (s === undefined || s === null) return '';
+  return String(s).replace(/ /g, '␣').replace(/\n/g, '⏎').replace(/\t/g, '⇥');
+}
+/* 分布機率 */
+function fmtPct(p){
+  const v = (p || 0) * 100;
+  if (v === 0) return '0%';
+  if (v < 0.01) return '<0.01%';
+  if (v >= 10) return v.toFixed(1) + '%';
+  return v.toFixed(2) + '%';
+}
+function trunc(s, n){
+  s = String(s ?? '');
+  return s.length > n ? s.slice(0, n) + '…' : s;
+}
+
+/* ============================================================
+   狀態
+   ============================================================ */
+let DATA = null;
+let curStep = 0;
+let curLayer = 0;
+
+/* 每幀延遲速度 */
+const raceState = {
+  mode: 'steps',
+  idx: 0,
+  playing: false,
+  delayMs: 1500,   // 每幀間隔多少毫秒
+};
+const DELAY_MIN = 200;
+const DELAY_MAX = 3000;
+const DELAY_STEP = 50;
+
+let raceRafId = null;
+let raceGeneration = 0;
+function stopRaceRaf(){
+  raceGeneration++;
+  if (raceRafId !== null){
+    cancelAnimationFrame(raceRafId);
+    raceRafId = null;
+  }
+}
+
+/* ============================================================
+   文件載入
+   ============================================================ */
+const dropZone = $('#drop');
+const fileInput = $('#file');
+
+fileInput.addEventListener('change', e => {
+  const f = e.target.files[0];
+  if (f) readFile(f);
+});
+['dragenter','dragover'].forEach(ev =>
+  dropZone.addEventListener(ev, e => {
+    e.preventDefault();
+    dropZone.querySelector('.drop-inner').classList.add('dragover');
+  })
+);
+['dragleave','drop'].forEach(ev =>
+  dropZone.addEventListener(ev, e => {
+    e.preventDefault();
+    dropZone.querySelector('.drop-inner').classList.remove('dragover');
+  })
+);
+dropZone.addEventListener('drop', e => {
+  const f = e.dataTransfer.files[0];
+  if (f) readFile(f);
+});
+
+function readFile(file){
+  const rd = new FileReader();
+  rd.onload = () => {
+    try { load(JSON.parse(rd.result)); }
+    catch (err) { alert('JSON 解析失敗：' + err.message); }
+  };
+  rd.readAsText(file);
+}
+
+$('#reload').addEventListener('click', () => {
+  stopRaceRaf();
+  raceState.playing = false;
+  raceState.idx = 0;
+  DATA = null;
+  $('#app').classList.add('hidden');
+  dropZone.classList.remove('hidden');
+  fileInput.value = '';
+});
+
+/* ============================================================
+   載入數據
+   ============================================================ */
+function load(data){
+  DATA = data;
+  curStep = 0;
+  curLayer = 0;
+  raceState.idx = 0;
+  raceState.playing = false;
+
+  dropZone.classList.add('hidden');
+  $('#app').classList.remove('hidden');
+
+  const name = (data.model_name || 'model').split(/[\\/]/).pop();
+  $('#modelName').textContent = name;
+  $('#modelName').title = data.model_name || '';
+
+  renderBadges();
+  $('#promptText').textContent = data.prompt_text_decoded || '';
+  $('#genText').textContent    = data.generated_text_decoded || '';
+
+  renderStepList();
+  selectStep(0);
+}
+
+/* ============================================================
+   badge
+   ============================================================ */
+function renderBadges(){
+  const c = DATA.config || {};
+  const box = $('#badges');
+  box.innerHTML = '';
+  const items = [
+    ['backend',   DATA.backend],
+    ['adapter',   DATA.adapter_used],
+    ['decoding',  c.decoding],
+    ['max_new',   c.max_new_tokens],
+    ['mode',      c.mode],
+    ['layers',    c.layers],
+    ['steps',     (DATA.steps || []).length],
+  ];
+  items.forEach(([k, v]) => {
+    if (v === undefined || v === null) return;
+    const chip = el('span', 'chip');
+    chip.innerHTML = `${esc(k)} <b>${esc(v)}</b>`;
+    box.appendChild(chip);
+  });
+  if (c.logit_lens && c.logit_lens.enabled){
+    const chip = el('span','chip');
+    chip.innerHTML = `logit_lens <b>${esc(c.logit_lens.arch || '')}</b>` +
+                     (c.logit_lens.softcap ? ` · softcap <b>${c.logit_lens.softcap}</b>` : '') +
+                     (c.logit_lens.tied ? ' · <b>tied</b>' : '');
+    box.appendChild(chip);
+  }
+  if (c.backend_limitations){
+    const chip = el('span','chip warn');
+    chip.textContent = '⚠ ' + c.backend_limitations;
+    box.appendChild(chip);
+  }
+}
+
+/* ============================================================
+   步驟列表
+   ============================================================ */
+function renderStepList(){
+  const list = $('#stepList');
+  list.innerHTML = '';
+  (DATA.steps || []).forEach((s, i) => {
+    const btn = el('button', 'step-btn');
+    btn.dataset.i = i;
+    const kind = s.type === 'prefill' ? 'prefill' : 'decode';
+    const txt  = s.output_token ? vis(s.output_token.text) : '';
+    btn.innerHTML =
+      `<span class="idx">#${i}</span>` +
+      `<span class="kind ${kind}">${kind === 'prefill' ? 'PRE' : 'DEC'}</span>` +
+      `<span class="tok">${esc(trunc(txt || '∅', 10))}</span>`;
+    btn.addEventListener('click', () => selectStep(i));
+    list.appendChild(btn);
+  });
+}
+
+function selectStep(i){
+  curStep = i;
+  const s = DATA.steps[i];
+  const n = (s.layers || []).length;
+  curLayer = Math.min(curLayer, Math.max(0, n - 1));
+  raceState.idx = 0;
+  $$('.step-btn').forEach(b => b.classList.toggle('active', +b.dataset.i === i));
+  renderMain();
+}
+
+/* ============================================================
+   位置 → token 文本 映射
+   ============================================================ */
+function buildSeqMap(){
+  const map = {};
+  (DATA.prompt_tokens || []).forEach(t => { map[t.position] = t.text; });
+  (DATA.steps || []).forEach(s => {
+    if (s.output_token) map[s.output_token.position] = s.output_token.text;
+    (s.input_tokens || []).forEach(t => { map[t.position] = t.text; });
+  });
+  return map;
+}
+
+/* ============================================================
+   主區域渲染
+   ============================================================ */
+function renderMain(){
+  const s   = DATA.steps[curStep];
+  const seq = buildSeqMap();
+  const main = $('#main');
+  main.innerHTML = '';
+
+  const info = el('div', 'panel');
+  const grid = el('div', 'info-grid');
+  grid.innerHTML = `
+    <div class="info-item"><span class="k">步驟</span><span class="v">#${s.index} · ${esc(s.type)}</span></div>
+    <div class="info-item"><span class="k">KV Cache</span><span class="v">${s.cache_len_before} → ${s.cache_len_after}</span></div>
+    <div class="info-item"><span class="k">輸入 Token</span><span class="v">${(s.input_tokens || []).length}</span></div>
+    <div class="info-item"><span class="k">層數</span><span class="v">${(s.layers || []).length}</span></div>
+  `;
+  info.appendChild(grid);
+  const strip = el('div', 'tok-strip');
+  (s.input_tokens || []).forEach(t => {
+    const chip = el('div', 'tok-chip' + (t.is_special ? ' special' : ''));
+    chip.innerHTML =
+      `<span class="chip-pos">${t.position}</span>` +
+      `<span class="chip-text">${esc(vis(t.text) || '∅')}</span>`;
+    chip.title = `id=${t.id}`;
+    strip.appendChild(chip);
+  });
+  info.appendChild(strip);
+  main.appendChild(info);
+
+  main.appendChild(renderDistribution(s));
+  main.appendChild(renderRacePanel());
+  main.appendChild(renderLayerSection(s, seq));
+}
+
+/* ---------- 輸出分布 ---------- */
+function renderDistribution(s){
+  const wrap = el('div', 'panel');
+  const dist = s.output_distribution || [];
+  const outTok = s.output_token ? vis(s.output_token.text) : '∅';
+  const title = el('div', 'panel-title');
+  title.innerHTML = `輸出分布 &nbsp;·&nbsp; 採樣結果 <span style="color:#7cb6ff;font-family:var(--mono)">${esc(outTok)}</span>`;
+  wrap.appendChild(title);
+  if (!dist.length){
+    wrap.appendChild(el('div', 'muted', '無分布數據'));
+    return wrap;
+  }
+  const maxP = Math.max(...dist.map(d => d.prob), 1e-9);
+  const list = el('div', 'dist-list');
+  dist.forEach(d => {
+    const row = el('div', 'dist-row' + (d.rank === 0 ? ' top' : ''));
+    row.innerHTML =
+      `<div class="dist-tok">
+         <span class="tok-text">${esc(vis(d.text) || '∅')}</span>
+         <span class="tok-id">#${d.token_id}</span>
+       </div>
+       <div class="dist-bar">
+         <div class="dist-fill${d.rank === 0 ? ' best' : ''}" style="width:${(d.prob / maxP * 100).toFixed(2)}%"></div>
+       </div>
+       <div class="dist-p">${fmtPct(d.prob)}</div>`;
+    list.appendChild(row);
+  });
+  wrap.appendChild(list);
+  return wrap;
+}
+
+/* ============================================================
+   長條圖
+   ============================================================ */
+function getRaceFrames(){
+  if (!DATA) return [];
+  if (raceState.mode === 'steps'){
+    return (DATA.steps || []).map((s, i) => {
+      const outTok = s.output_token ? (vis(s.output_token.text) || '∅') : '∅';
+      return {
+        label: `Step ${i}/${(DATA.steps || []).length - 1} · 輸出 "${outTok}"`,
+        entries: (s.output_distribution || []).map(d => ({
+          key: 't' + d.token_id,
+          label: vis(d.text) || '∅',
+          value: d.prob,
+        })),
+      };
+    });
+  }
+  const s = DATA.steps[curStep];
+  return (s.layers || []).map(L => ({
+    label: `Layer ${L.layer_index} · logit_lens top`,
+    entries: (L.logit_lens || []).map(x => ({
+      key: 't' + x.token_id,
+      label: vis(x.text) || '∅',
+      value: x.prob,
+    })),
+  }));
+}
+
+function raceEase(t){
+  const lo = 0.18, hi = 0.82;
+  if (t <= lo) return 0;
+  if (t >= hi) return 1;
+  const x = (t - lo) / (hi - lo);
+  return x * x * (3 - 2 * x);
+}
+
+function renderRacePanel(){
+  stopRaceRaf();
+
+  const wrap = el('div', 'panel');
+  const MAX_BARS = 7;
+  const ROW_H = 34;
+
+  /* ---------- 標題 + 控制條 ---------- */
+  const headRow = el('div', 'panel-title-row');
+  const tt = el('div', 'panel-title');
+  tt.innerHTML = '長條圖 <span style="color:var(--muted);font-weight:400;font-size:11px">Bar Race</span>';
+  headRow.appendChild(tt);
+
+  const ctrl = el('div', 'race-controls');
+
+  const modeSel = el('select', 'race-select');
+  modeSel.innerHTML =
+    `<option value="steps">跨步驟 · 輸出分布</option>
+     <option value="layers">跨層 · Logit Lens</option>`;
+  modeSel.value = raceState.mode;
+
+  const btnPrev  = el('button', 'btn tiny', '⟨');
+  const btnPlay  = el('button', 'btn tiny', raceState.playing ? '⏸' : '▶');
+  btnPlay.title = raceState.playing ? '暫停' : '播放';
+  const btnNext  = el('button', 'btn tiny', '⟩');
+
+  /* 幀間隔 */
+  const delayBox = el('div', 'race-delay');
+  const delayLbl = el('span', 'race-delay-label', '幀間隔');
+  const delaySlider = el('input', 'race-delay-slider');
+  delaySlider.type = 'range';
+  delaySlider.min = DELAY_MIN;
+  delaySlider.max = DELAY_MAX;
+  delaySlider.step = DELAY_STEP;
+  delaySlider.value = raceState.delayMs;
+  delaySlider.title = '每幀之間多少毫秒（越小越快）';
+  const delayVal = el('span', 'race-delay-value', raceState.delayMs + ' ms');
+  delayBox.append(delayLbl, delaySlider, delayVal);
+
+  /* 快捷预设 */
+  const presets = [
+    { v: 300,  t: '300'  },
+    { v: 600,  t: '600'  },
+    { v: 1200, t: '1200' },
+    { v: 2400, t: '2400' },
+  ];
+  const presetBtns = presets.map(p => {
+    const b = el('button', 'delay-preset' + (raceState.delayMs === p.v ? ' active' : ''), p.t);
+    b.type = 'button';
+    b.addEventListener('click', () => {
+      raceState.delayMs = p.v;
+      delaySlider.value = p.v;
+      delayVal.textContent = p.v + ' ms';
+      presetBtns.forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+    });
+    delayBox.appendChild(b);
+    return b;
+  });
+
+  const labEl = el('span', 'race-label', '');
+
+  ctrl.append(modeSel, btnPrev, btnPlay, btnNext, delayBox, labEl);
+  headRow.appendChild(ctrl);
+  wrap.appendChild(headRow);
+
+  /* 進度條 */
+  const progWrap = el('div', 'race-progress');
+  const progFill = el('div', 'race-progress-fill');
+  progWrap.appendChild(progFill);
+  wrap.appendChild(progWrap);
+
+  /* ---------- 數據---------- */
+  const frames = getRaceFrames();
+  if (frames.length < 2){
+    wrap.appendChild(el('div', 'muted', frames.length ? '只有一幀' : '無可用數據'));
+    return wrap;
+  }
+
+  const allKeys = new Set();
+  const labelMap = new Map();
+  frames.forEach(f => f.entries.forEach(e => {
+    allKeys.add(e.key);
+    if (!labelMap.has(e.key)) labelMap.set(e.key, e.label);
+  }));
+
+  const frameValues = frames.map(f => {
+    const m = new Map();
+    f.entries.forEach(e => m.set(e.key, e.value));
+    return m;
+  });
+
+  /* ---------- DOM ---------- */
+  const chart = el('div', 'race-chart');
+  chart.style.height = (MAX_BARS * ROW_H + 8) + 'px';
+  wrap.appendChild(chart);
+
+  const bars = new Map();
+
+  function ensureBar(key){
+    let b = bars.get(key);
+    if (b) return b;
+    const root = el('div', 'race-bar');
+    const labelEl = el('div', 'race-bar-label', '');
+    const track = el('div', 'race-bar-track');
+    const fill = el('div', 'race-bar-fill');
+    const valueEl = el('div', 'race-bar-value', '');
+    track.appendChild(fill);
+    root.append(labelEl, track, valueEl);
+    chart.appendChild(root);
+
+    b = {
+      root, fill, labelEl, valueEl,
+      y: MAX_BARS * ROW_H,
+      targetY: MAX_BARS * ROW_H,
+      visible: false,
+    };
+    bars.set(key, b);
+    return b;
+  }
+
+  /* ---------- 動畫 ---------- */
+  let curFrame = Math.min(raceState.idx, frames.length - 1);
+  let nextFrame = (curFrame + 1) % frames.length;
+  let t = 0;
+  let lastTime = 0;
+  let playing = raceState.playing;
+
+  function drawFrame(){
+    const ease = raceEase(t);
+
+    const values = new Map();
+    allKeys.forEach(k => {
+      const va = frameValues[curFrame].get(k) || 0;
+      const vb = frameValues[nextFrame].get(k) || 0;
+      values.set(k, va + (vb - va) * ease);
+    });
+
+    const arr = Array.from(values.entries()).sort((a, b) => b[1] - a[1]);
+    const top = arr.slice(0, MAX_BARS);
+    const maxVal = top.length ? Math.max(top[0][1], 1e-9) : 1;
+
+    const visibleKeys = new Set();
+
+    top.forEach(([k, v], rank) => {
+      visibleKeys.add(k);
+      const b = ensureBar(k);
+      const targetY = rank * ROW_H;
+
+      if (!b.visible){
+        b.visible = true;
+        b.root.classList.add('visible');
+        b.y = MAX_BARS * ROW_H;
+      }
+      b.targetY = targetY;
+
+      const pct = (v / maxVal) * 100;
+      b.fill.style.width = pct.toFixed(2) + '%';
+
+      const lbl = labelMap.get(k) || '?';
+      if (b.labelEl.textContent !== lbl) b.labelEl.textContent = lbl;
+      b.valueEl.textContent = fmtPct(v);
+
+      b.root.classList.toggle('top', rank === 0);
+    });
+
+    bars.forEach((b, k) => {
+      if (!visibleKeys.has(k) && b.visible){
+        b.visible = false;
+        b.root.classList.remove('visible');
+        b.root.classList.remove('top');
+        b.targetY = MAX_BARS * ROW_H;
+      }
+    });
+
+    const LERP = 0.18;
+    bars.forEach(b => {
+      const dy = b.targetY - b.y;
+      if (Math.abs(dy) < 0.05) b.y = b.targetY;
+      else b.y += dy * LERP;
+      b.root.style.transform = `translate3d(0, ${b.y.toFixed(2)}px, 0)`;
+    });
+
+    labEl.textContent = frames[curFrame].label;
+    labEl.title = frames[curFrame].label;
+    progFill.style.width = ((curFrame + t) / frames.length * 100).toFixed(2) + '%';
+  }
+
+  /* ---------- 主循環 ---------- */
+  const myGen = raceGeneration;
+  function loop(now){
+    if (myGen !== raceGeneration) return;
+
+    if (lastTime === 0) lastTime = now;
+    let dt = now - lastTime;
+    lastTime = now;
+    if (dt > 200) dt = 200;
+
+    if (playing){
+      /* 幀時長 = 用戶設定的幀間隔（ms），实时生效 */
+      const frameMs = Math.max(30, raceState.delayMs);
+      t += dt / frameMs;
+      while (t >= 1){
+        t -= 1;
+        curFrame = (curFrame + 1) % frames.length;
+        raceState.idx = curFrame;
+      }
+      nextFrame = (curFrame + 1) % frames.length;
+    }
+
+    drawFrame();
+    raceRafId = requestAnimationFrame(loop);
+  }
+  raceRafId = requestAnimationFrame(loop);
+
+  /* ---------- 控件 ---------- */
+  function setPlayIcon(){
+    btnPlay.textContent = playing ? '⏸' : '▶';
+    btnPlay.title = playing ? '暫停' : '播放';
+    raceState.playing = playing;
+  }
+  function jumpTo(idx){
+    curFrame = ((idx % frames.length) + frames.length) % frames.length;
+    raceState.idx = curFrame;
+    nextFrame = (curFrame + 1) % frames.length;
+    t = 0;
+    lastTime = 0;
+  }
+
+  btnPlay.addEventListener('click', () => {
+    playing = !playing;
+    lastTime = 0;
+    setPlayIcon();
+  });
+  btnPrev.addEventListener('click', () => {
+    playing = false; setPlayIcon();
+    jumpTo(curFrame - 1);
+    drawFrame();
+  });
+  btnNext.addEventListener('click', () => {
+    playing = false; setPlayIcon();
+    jumpTo(curFrame + 1);
+    drawFrame();
+  });
+  modeSel.addEventListener('change', () => {
+    raceState.mode = modeSel.value;
+    raceState.idx = 0;
+    const fresh = renderRacePanel();
+    wrap.parentNode.replaceChild(fresh, wrap);
+  });
+
+  /* 幀間隔滑塊 */
+  delaySlider.addEventListener('input', () => {
+    const v = parseInt(delaySlider.value, 10);
+    raceState.delayMs = v;
+    delayVal.textContent = v + ' ms';
+    presetBtns.forEach(x => x.classList.remove('active'));
+    presets.forEach((p, i) => {
+      if (v === p.v) presetBtns[i].classList.add('active');
+    });
+  });
+
+  setPlayIcon();
+  drawFrame();
+  return wrap;
+}
+
+/* ============================================================
+   層瀏覽
+   ============================================================ */
+function renderLayerSection(s, seq){
+  const wrap = el('div', 'panel');
+  const layers = s.layers || [];
+
+  const headRow = el('div', 'panel-title-row');
+  headRow.appendChild(el('div', 'panel-title', `層級詳情 · 共 ${layers.length} 層`));
+
+  const ctrl = el('div', 'layer-ctrl');
+  const btnPrev = el('button', 'btn tiny', '‹');
+  const btnNext = el('button', 'btn tiny', '›');
+  const slider  = el('input', 'layer-slider');
+  slider.type = 'range';
+  slider.min = 0;
+  slider.max = Math.max(0, layers.length - 1);
+  slider.value = curLayer;
+  const num = el('span', 'layer-num', curLayer);
+
+  ctrl.append(btnPrev, slider, num, btnNext);
+  headRow.appendChild(ctrl);
+  wrap.appendChild(headRow);
+
+  const body = el('div', 'layer-body');
+  wrap.appendChild(body);
+
+  function draw(){
+    body.innerHTML = '';
+    const L = layers[curLayer];
+    if (!L){
+      body.appendChild(el('div', 'muted', '無該層數據'));
+      return;
+    }
+    body.appendChild(renderResidual(L));
+    body.appendChild(renderAttn(L, seq));
+    body.appendChild(renderMLP(L));
+    body.appendChild(renderLogitLens(L));
+  }
+  function onSlide(){
+    curLayer = +slider.value;
+    num.textContent = curLayer;
+    draw();
+  }
+  slider.addEventListener('input', onSlide);
+  btnPrev.addEventListener('click', () => { slider.value = Math.max(0, curLayer - 1); onSlide(); });
+  btnNext.addEventListener('click', () => { slider.value = Math.min(layers.length - 1, curLayer + 1); onSlide(); });
+
+  draw();
+  return wrap;
+}
+
+function renderResidual(L){
+  const card = el('div', 'card wide');
+  const norms = L.residual_norms || [];
+  card.appendChild(el('div', 'card-title', `殘差範數 · layer ${L.layer_index} · 位置數 ${norms.length}`));
+
+  const max = Math.max(...norms, 1e-9);
+  const row = el('div', 'resid-row');
+  norms.forEach((v, i) => {
+    const item = el('div', 'resid-item');
+    const bar  = el('div', 'resid-bar');
+    const fill = el('div', 'resid-fill');
+    fill.style.height = Math.max(2, (v / max * 100)).toFixed(1) + '%';
+    bar.appendChild(fill);
+    item.append(bar, el('div', 'resid-lab', i));
+    item.title = `位置 ${i}：${v.toFixed(3)}`;
+    row.appendChild(item);
+  });
+  card.appendChild(row);
+  return card;
+}
+
+function renderAttn(L, seq){
+  const card = el('div', 'card wide');
+  const heads = (L.attn && L.attn.heads) || [];
+  card.appendChild(el('div', 'card-title', `注意力 · ${heads.length} 个 Head · 每行 = (key 位置 → token)`));
+  const grid = el('div', 'head-grid');
+  heads.forEach(h => {
+    const hc = el('div', 'head-card');
+    const t = el('div', 'head-title');
+    t.innerHTML =
+      `<span class="tag">H${h.head_index}</span>` +
+      `<span class="muted">entropy ${(+h.entropy).toFixed(3)}</span>`;
+    hc.appendChild(t);
+
+    const list = el('div', 'kv-list');
+    const keys = h.topk_keys || [];
+    const maxW = Math.max(...keys.map(k => k.weight), 1e-9);
+    keys.forEach(k => {
+      const rawTok = seq[k.key_pos];
+      const tokTxt = rawTok === undefined ? '—' : (vis(rawTok) || '∅');
+      const row = el('div', 'kv-row');
+      row.innerHTML =
+        `<span class="kv-pos">${k.key_pos}</span>
+         <span class="kv-tok" title="${esc(tokTxt)}">${esc(trunc(tokTxt, 8))}</span>
+         <span class="kv-bar"><span class="kv-fill" style="width:${(k.weight / maxW * 100).toFixed(1)}%"></span></span>
+         <span class="kv-w">${fmtPct(k.weight)}</span>`;
+      list.appendChild(row);
+    });
+    hc.appendChild(list);
+    grid.appendChild(hc);
+  });
+  card.appendChild(grid);
+  return card;
+}
+
+function renderMLP(L){
+  const card = el('div', 'card');
+  const mlp = L.mlp || {};
+  const norm = mlp.activation_norm !== undefined ? (+mlp.activation_norm).toFixed(2) : '—';
+  card.appendChild(el('div', 'card-title', `MLP Top 神經元 · 激活範數 ${norm}`));
+  const neurons = mlp.topk_neurons || [];
+  const max = Math.max(...neurons.map(n => Math.abs(n.activation)), 1e-9);
+  const list = el('div', 'kv-list');
+  neurons.forEach(n => {
+    const isNeg = n.activation < 0;
+    const row = el('div', 'kv-row mlp');
+    row.innerHTML =
+      `<span class="kv-pos">${n.neuron_id}</span>
+       <span class="kv-bar"><span class="kv-fill${isNeg ? ' neg' : ''}" style="width:${(Math.abs(n.activation) / max * 100).toFixed(1)}%"></span></span>
+       <span class="kv-w">${n.activation.toFixed(2)}</span>`;
+    list.appendChild(row);
+  });
+  card.appendChild(list);
+  return card;
+}
+
+function renderLogitLens(L){
+  const card = el('div', 'card');
+  const lens = L.logit_lens || [];
+  card.appendChild(el('div', 'card-title', `Logit Lens · 該層預測 Top-${lens.length}`));
+  const max = Math.max(...lens.map(x => x.prob), 1e-9);
+  const list = el('div', 'kv-list');
+  lens.forEach(x => {
+    const tokTxt = vis(x.text) || '∅';
+    const row = el('div', 'kv-row lens');
+    row.innerHTML =
+      `<span class="kv-pos">${x.rank}</span>
+       <span class="kv-tok" title="${esc(tokTxt)}">${esc(trunc(tokTxt, 8))}</span>
+       <span class="kv-bar"><span class="kv-fill" style="width:${(x.prob / max * 100).toFixed(1)}%"></span></span>
+       <span class="kv-w">${fmtPct(x.prob)}</span>`;
+    list.appendChild(row);
+  });
+  card.appendChild(list);
+  return card;
+}
+</script>
+</body>
+</html>
